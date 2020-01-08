@@ -12,3 +12,17 @@ function dump(){
         echo "</pre>";
     }
 }
+
+function filescan($target){
+    if(!is_dir($target)) return $target;
+    
+    $result = [];
+    $founds = scandir($target);
+    foreach($founds as $found){
+        if($found === "." || $found === "..") continue;
+        $foundPath = $target.DIRECTORY_SEPARATOR.$found;
+        if(is_dir($foundPath)) $result = array_merge($result, filescan($foundPath));
+        else $result[] = $foundPath;
+    }
+    return $result;
+}

@@ -1,7 +1,7 @@
 
 <?php
     require "helper.php";
-    require "Excel.php";
+    require "ExcelWriter.php";
 
     $data = [
         [
@@ -36,7 +36,7 @@
         ]
     ];
 
-    $excel = new Excel();
-    $file = $excel->create($data);
+    $excel = new ExcelWriter();
+    $excel->write($data)->save("class_list");
 
     ?>
