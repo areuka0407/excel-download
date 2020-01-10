@@ -3,32 +3,18 @@
 defined("DS") OR define("DS", DIRECTORY_SEPARATOR);
 defined("EXCEL_ROOT") OR define("EXCEL_ROOT", __DIR__);
 
+error_reporting(E_ALL);
 ini_set("memory_limit", -1);
 set_time_limit(0);
 
 
 class ExcelWriter {
-    static $sheetInitialString = "<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" xmlns:mc=\"http://schemas.openxmlformats.org/markup-compatibility/2006\" xmlns:x14ac=\"http://schemas.microsoft.com/office/spreadsheetml/2009/9/ac\" mc:Ignorable=\"x14ac\">
-                                    <dimension ref=\"A1:A1\"/>
-                                    <sheetViews>
-                                        <sheetView tabSelected=\"1\" workbookViewId=\"0\">
-                                        <selection activeCell=\"A1\" sqref=\"A1\"/>
-                                    </sheetView>
-                                    </sheetViews>
-                                    <sheetFormatPr defaultRowHeight=\"16.5\" x14ac:dyDescent=\"0.3\"/>
-                                    <sheetData></sheetData>
-                                    <phoneticPr fontId=\"1\" type=\"noConversion\"/>
-                                    <pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/>
-                                </worksheet>";
-
-    static $stringInitialString = "<sst xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" count=\"0\" uniqueCount=\"0\"></sst>";
-
-
     static $stringPath = "/xl/sharedStrings.xml";
     static $sheetPath = "/xl/worksheets/sheet1.xml";
 
     function __construct()
     {
+        $this->filename = "./test.xlsx";
         $this->template = EXCEL_ROOT.DS."template.xlsx";
         $this->temp_path = EXCEL_ROOT.DS."temp";
 
@@ -56,64 +42,47 @@ class ExcelWriter {
         $result = $zip->open($this->template);
         if(!$result) throw "템플릿 파일을 읽을 수 없습니다.";
         $zip->extractTo($this->temp_path);
+        $this->sheet = simplexml_load_file($this->temp_path . self::$sheetPath);
+        $this->string = simplexml_load_file($this->temp_path . self::$stringPath);
+
         $zip->close();
-
-        $this->sheet = new SimpleXMLElement(self::$sheetInitialString);
-        $this->string = new SimpleXMLElement(self::$stringInitialString);
-    }
-
-    private function takeCelName($row, $col){
-        $strings = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-        $strlen = strlen($strings);
-        $colName = "";
-        while($col >= 0){
-            if($col === 0) {
-                $colName .= "A";
-                break;
-            }
-            $colName .= $strings[$col % $strlen];
-            $col = (int)($col / $strlen) - 1;
-        }
-        $colName = strrev($colName);
-        $row++;
-        return "{$colName}{$row}";
-    }
-
-    private function addString($data){
-        $current_index = (int)$this->string['count'];
-        $this->string['count'] = $current_index + 1;
-        $this->string['uniqueCount'] = (int)$this->string['uniqueCount'] + 1;;
-        $si = $this->string->addChild("si");
-        $si->t = $data;
-        $ph = $si->addChild("phoneticPr");
-        $ph->addAttribute("fontId", "1");
-        $ph->addAttribute("type", "noConversion");
-        return $current_index;
-    }
-    private function addColumn($rowXML, $row, $rowData = []){
-        foreach($rowData as $col => $colData){
-            $c = $rowXML->addChild("c");
-            $c->addAttribute("r", $this->takeCelName($row, $col));
-            $c->addAttribute("t", "s");
-            $c->v = $this->addString($colData);
-        }
+        // dd($this->string, $this->sheet);
     }
 
     // 2차원 배열을 입력 받아 엑셀을 작성한다
-    public function write($data){
-        $max_colcnt = 0;
-        $rowCount = count($data);
-        foreach($data as $row => $rowData){
-            $colCount = count($rowData);
-            max($max_colcnt, $colCount);
+    public function _write($data){
+        $colName = "ABCD";
+        $this->string['count'] = 0;
+        $this->string['uniqueCount'] = 0;
 
-            $rowXML = $this->sheet->sheetData->addChild("row");
-            $rowXML->addAttribute("r", $row + 1);
-            $rowXML->addAttribute("spans", "1:".$colCount);
-            $rowXML->addAttribute("x14ac:dyDescent", "0.3");
-            $this->addColumn($rowXML, $row, $rowData);
+        $idx = 0;
+        foreach($data as $idx => $item){
+            $this->sheet->sheetData->row[$idx]['r'] = (string)($idx + 1);
+            $this->sheet->sheetData->row[$idx]['spans'] = "1:4";
+            
+            for($i = 0; $i < count($item); $i ++){
+                $cell = $item[$i];
+                // 문자열이면 string에 넣어줘야함
+                if(gettype($cell) === "string"){
+                    $stringIdx = $this->string['count'] * 1;
+
+                    // 스트링 데이터
+                    $this->string['uniqueCount'] = (string)($stringIdx + 1);
+                    $this->string['count'] = (string)($stringIdx + 1);
+                    
+                    $this->string->si[$stringIdx]->t = $cell;
+
+                    // 시트 데이터
+                    $this->sheet->sheetData->row[$idx]->c[$i]['r'] = $colName[$i].($idx + 1);
+                    $this->sheet->sheetData->row[$idx]->c[$i]['t'] = "s"; // 문자열일 때만 t 속성 있어야함
+                    $this->sheet->sheetData->row[$idx]->c[$i]->v = $stringIdx;
+                }
+                else {
+                    $this->sheet->sheetData->row[$idx]->c[$i]['r'] = $colName[$i].($idx + 1);
+                    $this->sheet->sheetData->row[$idx]->c[$i]->v = $cell;
+                }
+            }   
         }
-        $this->sheet->dimension['ref'] = "A1:".$this->takeCelName($rowCount - 1, $colCount -1);
 
         $this->string->asXML($this->temp_path . self::$stringPath);
         $this->sheet->asXML($this->temp_path . self::$sheetPath);
@@ -121,34 +90,81 @@ class ExcelWriter {
         return $this;
     }
 
-    public function save($filename){
-        $filename = __DIR__.DS.$filename.".xlsx";
-        touch($filename);
+    public function write($data)
+    {
 
+        $cellName = ["A", "B", "C", "D"];  //샘플데이터가 4열까지만 이뤄져있으니 이 4개면 된다.
+        $this->string['count'] = "0";
+        $this->string['uniqueCount'] = "0";
+        foreach ($data as $idx => $item){
+            $this->sheet->sheetData->row[$idx]['r'] = (string)($idx + 1);
+            //샘플데이터가 4열까지 정방으로 채워지니 여기는 무조건 1:4로 놓으면 된다.
+            //만약 샘플데이터가 행마다 열의 갯수가 다르다면 카운트를 세어서 직접 적어주어야 한다.
+            $this->sheet->sheetData->row[$idx]['spans'] = (string)("1:4");
+            for($i = 0; $i < count($item); $i++){
+                $cell = $item[$i];
+                if(gettype($cell) === "string" ){
+                    //입력데이터가 문자일경우 string에 먼저 삽입하고 셀을 추가하는 방식으로 해야한다.
+                    //현재 스트링 인덱스를 하나 추가시켜주고
+                    $stringIdx = $this->string['count'] * 1;
+
+                    $this->string['count'] = (string)($stringIdx + 1);
+                    $this->string['uniqueCount'] = (string)($stringIdx + 1);
+                    //스트링에 추가한다.
+                    //$stringXML = simplexml_load_string("<t>{$cell}</t>");
+                    $this->string->si[$stringIdx]->t = $cell;
+                    //이후에 셀데이터를 xml로 만든다.
+                    $this->sheet->sheetData->row[$idx]->c[$i]['r'] = $cellName[$i] . ($idx + 1);
+                    $this->sheet->sheetData->row[$idx]->c[$i]['t'] = 's';
+                    $this->sheet->sheetData->row[$idx]->c[$i]->v = $stringIdx;
+                }else {
+                    //입력데이터가 숫자면 바로 셀로 삽입한다.
+                    $this->sheet->sheetData->row[$idx]->c[$i]['r'] = $cellName[$i] . ($idx + 1);
+                    $this->sheet->sheetData->row[$idx]->c[$i]->v =  $cell;
+                }
+            }
+        }
+        //xml 파일로 저장해주고
+        $this->sheet->asXML($this->temp_path . '/xl/worksheets/sheet1.xml');
+        $this->string->asXML($this->temp_path . '/xl/sharedStrings.xml');
+
+        return $this;
+    }
+
+
+    public function save(){
         $zip = new ZipArchive();
-        $result = $zip->open($filename, ZipArchive::OVERWRITE);
+        $result = $zip->open($this->filename, ZipArchive::OVERWRITE | ZipArchive::CREATE);
 
         $result or die("아카이브 파일을 열 수 없습니다.");
 
         $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($this->temp_path));
-        foreach($files as $name => $file){
+
+        foreach($files as $file){
             if($file->isDir()) continue;
             $filePath = $file->getRealPath();
-            $relativePath = substr($filePath, strlen($this->temp_path));
+            $relativePath = substr($filePath, strlen($this->temp_path) + 1);
             $zip->addFile($filePath, $relativePath);
         }
         $zip->close();
 
-        $zip->open($filename);
-        $zip->extractTo(__DIR__.DS."/compare");
+        $zip->open($this->filename);
+        $zip->extractTo(__DIR__."/compare");
         $zip->close();
 
-        // $this->removeTemp();
+        return $this;
     }
 
-    public function download($data){
-        header("Content-Type: application/vnd.ms-excel");
-        header("Content-Disposition: attachement; filename=excel-download.xlsx");
-        echo $data;
+    public function download(){
+        $target = $this->filename;
+        if($target){
+            header('Content-Type: application/octet-stream');
+            header("Content-Disposition:attachement; filename=down.xlsx");
+            
+            ob_clean();
+            
+            readfile($target);
+            exit;
+        }
     }
 }
